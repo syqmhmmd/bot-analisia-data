@@ -17,6 +17,10 @@ Dilengkapi dengan fitur chart interaktif, export Excel lengkap dengan chart, ser
 
 	pip install xlsxwriter
 
+  	pip install matplotlib
+
+   	pip install reportlab
+
 ---
 
 ## 🚀 Fitur Utama
