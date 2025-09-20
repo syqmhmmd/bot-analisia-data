@@ -64,4 +64,9 @@ Buka file nya terus klik kanan pilih " Buka di terminal ".
 
 Setelah itu bisa bikin file excel atau csvnya, bisa juga minta GPT buatin excel dummy
 
+---
+
+## Download disini
+
+ 	https://github.com/syqmhmmd/bot-analisia-data.git
 
