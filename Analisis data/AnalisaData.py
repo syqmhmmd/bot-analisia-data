@@ -2,21 +2,77 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
+import matplotlib.pyplot as plt
 
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+
+
+# =================== CONFIG ===================
 st.set_page_config(page_title="Dashboard Anggaran Advanced", layout="wide")
-st.title("📊 Dashboard Anggaran Advanced & Excel Lengkap")
+st.title("📊 Dashboard Anggaran Advanced & Export Lengkap")
 
 uploaded_file = st.file_uploader("Upload file Excel (.xlsx)", type="xlsx")
 
+# =================== EXPORT PDF ===================
+def export_pdf(dataframe, summary):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=(595, 842))  # A4
+    styles = getSampleStyleSheet()
+    elements = []
+
+    elements.append(Paragraph("📊 Laporan Anggaran", styles["Title"]))
+    elements.append(Spacer(1, 12))
+
+    # Ringkasan
+    for key, val in summary.items():
+        elements.append(Paragraph(f"<b>{key}:</b> {val}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    # === PIE CHART (Realisasi vs Sisa) ===
+    if "Total Realisasi" in summary and "Total Anggaran" in summary:
+        total_anggaran = int(summary["Total Anggaran"].replace("Rp", "").replace(".", "").replace(",", ""))
+        total_realisasi = int(summary["Total Realisasi"].replace("Rp", "").replace(".", "").replace(",", ""))
+        total_sisa = total_anggaran - total_realisasi
+
+        fig, ax = plt.subplots(figsize=(4,4))
+        ax.pie([total_realisasi, total_sisa], labels=["Realisasi", "Sisa"], autopct='%1.1f%%')
+        ax.set_title("Realisasi vs Sisa")
+        pie_img = io.BytesIO()
+        plt.savefig(pie_img, format="png", bbox_inches="tight")
+        plt.close(fig)
+        pie_img.seek(0)
+        elements.append(Image(pie_img, width=200, height=200))
+        elements.append(Spacer(1, 12))
+
+    # === TABEL DATA ===
+    table_data = [list(dataframe.columns)] + dataframe.values.tolist()
+    table = Table(table_data, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold")
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+# =================== MAIN ===================
 if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
 
-        # ===== Pilih kolom otomatis =====
+        # Sidebar
         st.sidebar.header("Pengaturan Kolom")
         col_anggaran = st.sidebar.selectbox("Pilih kolom Anggaran", df.columns.tolist())
         col_realisasi = st.sidebar.selectbox("Pilih kolom Realisasi (opsional)", df.columns.tolist() + [None])
-        col_kategori = st.sidebar.multiselect("Pilih kolom Kategori (bisa lebih dari satu)", df.columns.tolist())
+        col_kategori = st.sidebar.multiselect("Pilih kolom Kategori", df.columns.tolist())
         col_tanggal = st.sidebar.selectbox("Pilih kolom Tanggal (opsional)", df.columns.tolist() + [None])
 
         # Convert ke numeric
@@ -24,15 +80,15 @@ if uploaded_file:
         if col_realisasi:
             df[col_realisasi] = pd.to_numeric(df[col_realisasi].astype(str).str.replace(',', '').str.replace('.', ''), errors='coerce')
 
-        # ===== Filter tanggal range =====
+        # Filter tanggal
         if col_tanggal:
             df[col_tanggal] = pd.to_datetime(df[col_tanggal], errors='coerce')
-            st.sidebar.subheader("Filter Tanggal Range")
-            tanggal_start = st.sidebar.date_input("Tanggal mulai", value=df[col_tanggal].min())
-            tanggal_end = st.sidebar.date_input("Tanggal akhir", value=df[col_tanggal].max())
+            st.sidebar.subheader("Filter Tanggal")
+            tanggal_start = st.sidebar.date_input("Mulai", value=df[col_tanggal].min())
+            tanggal_end = st.sidebar.date_input("Akhir", value=df[col_tanggal].max())
             df = df[(df[col_tanggal] >= pd.to_datetime(tanggal_start)) & (df[col_tanggal] <= pd.to_datetime(tanggal_end))]
 
-        # ===== Hitung total & sisa (Anggaran fix) =====
+        # Hitung
         total_anggaran = int(df[col_anggaran].iloc[0])
         total_realisasi = df[col_realisasi].sum() if col_realisasi else 0
         total_sisa = total_anggaran - total_realisasi
@@ -40,17 +96,25 @@ if uploaded_file:
         persen_sisa = round((total_sisa / total_anggaran * 100), 2)
         df["Sisa"] = df[col_realisasi] if col_realisasi else 0
 
+        summary = {
+            "Total Anggaran": f"Rp{total_anggaran:,.0f}",
+            "Total Realisasi": f"Rp{total_realisasi:,.0f}",
+            "Total Sisa": f"Rp{total_sisa:,.0f}",
+            "Persentase Serapan": f"{persen_serapan}%",
+            "Persentase Sisa": f"{persen_sisa}%"
+        }
+
         # ================= Tabs =================
-        tab1, tab2, tab3 = st.tabs(["Ringkasan", "Chart Interaktif", "Data Mentah"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Ringkasan", "Chart Interaktif", "Data Mentah", "Export"])
 
         with tab1:
             st.subheader("📌 Ringkasan Anggaran")
             col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Total Anggaran", f"Rp{total_anggaran:,.0f}")
-            col2.metric("Total Realisasi", f"Rp{total_realisasi:,.0f}")
-            col3.metric("Total Sisa", f"Rp{total_sisa:,.0f}")
-            col4.metric("Persentase Serapan", f"{persen_serapan}%")
-            col5.metric("Persentase Sisa", f"{persen_sisa}%")
+            col1.metric("Total Anggaran", summary["Total Anggaran"])
+            col2.metric("Total Realisasi", summary["Total Realisasi"])
+            col3.metric("Total Sisa", summary["Total Sisa"])
+            col4.metric("Persentase Serapan", summary["Persentase Serapan"])
+            col5.metric("Persentase Sisa", summary["Persentase Sisa"])
 
         with tab2:
             if col_kategori:
@@ -58,7 +122,7 @@ if uploaded_file:
                 df["Kategori Gabungan"] = df[col_kategori].astype(str).agg(" - ".join, axis=1)
 
                 pie_df = df.groupby("Kategori Gabungan")["Sisa"].sum().reset_index()
-                pie_fig = px.pie(pie_df, names="Kategori Gabungan", values="Sisa", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2)
+                pie_fig = px.pie(pie_df, names="Kategori Gabungan", values="Sisa", hole=0.4)
                 st.plotly_chart(pie_fig, use_container_width=True)
 
                 bar_cols = ["Sisa"]
@@ -72,55 +136,17 @@ if uploaded_file:
             st.subheader("🗂️ Data Mentah")
             st.dataframe(df, use_container_width=True)
 
-        # ================= Export Excel =================
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            df.to_excel(writer, sheet_name="Data", index=False)
-            workbook = writer.book
-            ws = writer.sheets["Data"]
+        with tab4:
+            # Export Excel
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                df.to_excel(writer, sheet_name="Data", index=False)
+            output.seek(0)
+            st.download_button("📥 Download Excel", data=output, file_name="Dashboard_Anggaran.xlsx")
 
-            # Top 5 Realisasi & Sisa highlight
-            if col_realisasi:
-                for idx in df.nlargest(5, col_realisasi).index:
-                    ws.write(idx+1, df.columns.get_loc(col_realisasi), df.at[idx, col_realisasi],
-                             workbook.add_format({'bg_color': '#C6EFCE'}))
-            for idx in df.nlargest(5, "Sisa").index:
-                ws.write(idx+1, df.columns.get_loc("Sisa"), df.at[idx, "Sisa"],
-                         workbook.add_format({'bg_color': '#FFC7CE'}))
-
-            # Bar Chart
-            chart_bar = workbook.add_chart({"type": "column"})
-            chart_bar.add_series({
-                "name": col_realisasi,
-                "categories": ["Data", 1, 0, len(df), 0],
-                "values": ["Data", 1, df.columns.get_loc(col_realisasi), len(df), df.columns.get_loc(col_realisasi)]
-            })
-            chart_bar.add_series({
-                "name": "Sisa",
-                "categories": ["Data", 1, 0, len(df), 0],
-                "values": ["Data", 1, df.columns.get_loc("Sisa"), len(df), df.columns.get_loc("Sisa")]
-            })
-            chart_bar.set_title({"name": "Realisasi vs Sisa"})
-            ws.insert_chart("H2", chart_bar)
-
-            # Pie Chart Excel
-            chart_pie = workbook.add_chart({"type": "pie"})
-            chart_pie.add_series({
-                "name": "Sisa per Kategori",
-                "categories": ["Data", 1, df.columns.get_loc("Kategori Gabungan"), len(df), df.columns.get_loc("Kategori Gabungan")],
-                "values": ["Data", 1, df.columns.get_loc("Sisa"), len(df), df.columns.get_loc("Sisa")],
-                "data_labels": {"percentage": True}
-            })
-            chart_pie.set_title({"name": "Sisa per Kategori"})
-            ws.insert_chart("H20", chart_pie)
-
-        output.seek(0)
-        st.download_button(
-            label="📥 Download Excel Lengkap dengan Chart",
-            data=output.getvalue(),
-            file_name="Dashboard_Anggaran_Excel_Lengkap.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            # Export PDF
+            pdf_file = export_pdf(df, summary)
+            st.download_button("📄 Download PDF", data=pdf_file, file_name="Dashboard_Anggaran.pdf")
 
     except Exception as e:
         st.error(f"Terjadi error: {e}")
