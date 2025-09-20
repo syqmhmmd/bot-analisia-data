@@ -69,4 +69,5 @@ Setelah itu bisa bikin file excel atau csvnya, bisa juga minta GPT buatin excel 
 ## Download disini
 
  	https://github.com/syqmhmmd/bot-analisia-data.git
+  
 
