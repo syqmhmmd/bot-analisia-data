@@ -32,19 +32,28 @@ def export_pdf(dataframe, summary):
 
     # === PIE CHART (Realisasi vs Sisa) ===
     if "Total Realisasi" in summary and "Total Anggaran" in summary:
-        total_anggaran = int(summary["Total Anggaran"].replace("Rp", "").replace(".", "").replace(",", ""))
-        total_realisasi = int(summary["Total Realisasi"].replace("Rp", "").replace(".", "").replace(",", ""))
+        # Hitung total anggaran & realisasi
+        total_anggaran = df[col_anggaran].sum()
         total_sisa = total_anggaran - total_realisasi
 
-        fig, ax = plt.subplots(figsize=(4,4))
-        ax.pie([total_realisasi, total_sisa], labels=["Realisasi", "Sisa"], autopct='%1.1f%%')
-        ax.set_title("Realisasi vs Sisa")
-        pie_img = io.BytesIO()
-        plt.savefig(pie_img, format="png", bbox_inches="tight")
-        plt.close(fig)
-        pie_img.seek(0)
-        elements.append(Image(pie_img, width=200, height=200))
-        elements.append(Spacer(1, 12))
+        persen_serapan = round((total_realisasi / total_anggaran * 100), 2) if col_realisasi else 0
+        persen_sisa = round((total_sisa / total_anggaran * 100), 2)
+
+    # Hitung sisa per kegiatan
+    if col_realisasi:
+        df["Sisa"] = df[col_anggaran] - df[col_realisasi]
+    else:
+         df["Sisa"] = df[col_anggaran]
+
+    fig, ax = plt.subplots(figsize=(4,4))
+    ax.pie([total_realisasi, total_sisa], labels=["Realisasi", "Sisa"], autopct='%1.1f%%')
+    ax.set_title("Realisasi vs Sisa")
+    pie_img = io.BytesIO()
+    plt.savefig(pie_img, format="png", bbox_inches="tight")
+    plt.close(fig)
+    pie_img.seek(0)
+    elements.append(Image(pie_img, width=200, height=200))
+    elements.append(Spacer(1, 12))
 
     # === TABEL DATA ===
     table_data = [list(dataframe.columns)] + dataframe.values.tolist()
@@ -80,12 +89,26 @@ if uploaded_file:
         if col_realisasi:
             df[col_realisasi] = pd.to_numeric(df[col_realisasi].astype(str).str.replace(',', '').str.replace('.', ''), errors='coerce')
 
-        # Filter tanggal
+        # Filter tanggal & tahun
         if col_tanggal:
+            import datetime
             df[col_tanggal] = pd.to_datetime(df[col_tanggal], errors='coerce')
-            st.sidebar.subheader("Filter Tanggal")
-            tanggal_start = st.sidebar.date_input("Mulai", value=df[col_tanggal].min())
-            tanggal_end = st.sidebar.date_input("Akhir", value=df[col_tanggal].max())
+            st.sidebar.subheader("Filter Tahun & Tanggal")
+            # Pilih tahun unik dari data, tambahkan tahun sekarang jika belum ada
+            tahun_tersedia = df[col_tanggal].dt.year.dropna().unique().tolist()
+            tahun_tersedia = [int(t) for t in tahun_tersedia if not pd.isnull(t)]
+            tahun_sekarang = datetime.datetime.now().year
+            if tahun_sekarang not in tahun_tersedia:
+                tahun_tersedia.append(tahun_sekarang)
+            tahun_tersedia = sorted(tahun_tersedia)
+            tahun_dipilih = st.sidebar.selectbox("Pilih Tahun", tahun_tersedia) if tahun_tersedia else None
+            if tahun_dipilih:
+                df = df[df[col_tanggal].dt.year == tahun_dipilih]
+            # Filter tanggal dalam tahun terpilih
+            tanggal_min = df[col_tanggal].min() if not df[col_tanggal].isna().all() else pd.Timestamp.today()
+            tanggal_max = df[col_tanggal].max() if not df[col_tanggal].isna().all() else pd.Timestamp.today()
+            tanggal_start = st.sidebar.date_input("Mulai", value=tanggal_min)
+            tanggal_end = st.sidebar.date_input("Akhir", value=tanggal_max)
             df = df[(df[col_tanggal] >= pd.to_datetime(tanggal_start)) & (df[col_tanggal] <= pd.to_datetime(tanggal_end))]
 
         # Hitung
@@ -131,6 +154,27 @@ if uploaded_file:
                 bar_df = df.groupby("Kategori Gabungan")[bar_cols].sum().reset_index()
                 bar_fig = px.bar(bar_df, x="Kategori Gabungan", y=bar_cols, barmode="group", text_auto=True)
                 st.plotly_chart(bar_fig, use_container_width=True)
+
+                # ================= Tambahan: Diagram Batang Matplotlib =================
+                st.subheader("📊 Biaya Kegiatan vs Sisa Anggaran (Matplotlib)")
+                kegiatan = df["Kategori Gabungan"]
+                biaya = df[col_realisasi] if col_realisasi else [0]*len(df)
+                sisa = df["Sisa"]
+
+                bar_width = 0.35
+                x = range(len(kegiatan))
+
+                fig, ax = plt.subplots()
+                ax.bar([i - bar_width/2 for i in x], biaya, width=bar_width, label="Biaya Kegiatan")
+                ax.bar([i + bar_width/2 for i in x], sisa, width=bar_width, label="Sisa Anggaran")
+
+                ax.set_xticks(list(x))
+                ax.set_xticklabels(kegiatan, rotation=15, ha="right")
+                ax.set_ylabel("Rupiah")
+                ax.set_title("Perbandingan Biaya Kegiatan & Sisa Anggaran")
+                ax.legend()
+
+                st.pyplot(fig)
 
         with tab3:
             st.subheader("🗂️ Data Mentah")
